@@ -2,23 +2,19 @@
 Author: Benny
 Date: Nov 2019
 """
-import argparse
 import os
 import torch
-import datetime
 import logging
-import sys
 import importlib
 import shutil
 import provider
 import numpy as np
 
-from pathlib import Path
 from tqdm import tqdm
 from dataset import PartNormalDataset
 import hydra
 import omegaconf
-
+from pprint import pformat
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -50,20 +46,19 @@ def main(args):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     logger = logging.getLogger(__name__)
 
-    print(args.pretty())
+    print(pformat(args))
 
-    root = hydra.utils.to_absolute_path('data/shapenetcore_partanno_segmentation_benchmark_v0_normal/')
+    root = hydra.utils.to_absolute_path(args.dataset.path)
 
-    TRAIN_DATASET = PartNormalDataset(root=root, npoints=args.num_point, split='trainval', normal_channel=args.normal)
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=args.batch_size, shuffle=True, num_workers=10, drop_last=True)
-    TEST_DATASET = PartNormalDataset(root=root, npoints=args.num_point, split='test', normal_channel=args.normal)
-    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=args.batch_size, shuffle=False, num_workers=10)
+    TRAIN_DATASET = PartNormalDataset(root=root, npoints=args.dataset.num_point, split='trainval', normal_channel=args.dataset.normal)
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=args.batch_size, shuffle=True, num_workers=args.dataset.num_workers, drop_last=True)
+    TEST_DATASET = PartNormalDataset(root=root, npoints=args.dataset.num_point, split='test', normal_channel=args.dataset.normal)
+    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=args.batch_size, shuffle=False, num_workers=args.dataset.num_workers)
 
     '''MODEL LOADING'''
-    args.input_dim = (6 if args.normal else 3) + 16
-    args.num_class = 50
-    num_category = 16
-    num_part = args.num_class
+    if not args.dataset.normal:
+        args.dataset.input_dim = args.dataset.input_dim_not_normal
+
     shutil.copy(hydra.utils.to_absolute_path('models/{}/model.py'.format(args.model.name)), '.')
 
     classifier = getattr(importlib.import_module('models.{}.model'.format(args.model.name)), 'PointTransformerSeg')(args).cuda()
@@ -129,13 +124,13 @@ def main(args):
             points, label, target = points.float().cuda(), label.long().cuda(), target.long().cuda()
             optimizer.zero_grad()
 
-            seg_pred = classifier(torch.cat([points, to_categorical(label, num_category).repeat(1, points.shape[1], 1)], -1))
-            seg_pred = seg_pred.contiguous().view(-1, num_part)
+            seg_pred = classifier(torch.cat([points, to_categorical(label, args.dataset.num_category).repeat(1, points.shape[1], 1)], -1))
+            seg_pred = seg_pred.contiguous().view(-1, args.dataset.num_class)
             target = target.view(-1, 1)[:, 0]
             pred_choice = seg_pred.data.max(1)[1]
 
             correct = pred_choice.eq(target.data).cpu().sum()
-            mean_correct.append(correct.item() / (args.batch_size * args.num_point))
+            mean_correct.append(correct.item() / (args.batch_size * args.dataset.num_point))
             loss = criterion(seg_pred, target)
             loss.backward()
             optimizer.step()
@@ -147,8 +142,8 @@ def main(args):
             test_metrics = {}
             total_correct = 0
             total_seen = 0
-            total_seen_class = [0 for _ in range(num_part)]
-            total_correct_class = [0 for _ in range(num_part)]
+            total_seen_class = [0 for _ in range(args.dataset.num_class)]
+            total_correct_class = [0 for _ in range(args.dataset.num_class)]
             shape_ious = {cat: [] for cat in seg_classes.keys()}
             seg_label_to_cat = {}  # {0:Airplane, 1:Airplane, ...49:Table}
 
@@ -161,7 +156,7 @@ def main(args):
             for batch_id, (points, label, target) in tqdm(enumerate(testDataLoader), total=len(testDataLoader), smoothing=0.9):
                 cur_batch_size, NUM_POINT, _ = points.size()
                 points, label, target = points.float().cuda(), label.long().cuda(), target.long().cuda()
-                seg_pred = classifier(torch.cat([points, to_categorical(label, num_category).repeat(1, points.shape[1], 1)], -1))
+                seg_pred = classifier(torch.cat([points, to_categorical(label, args.dataset.num_category).repeat(1, points.shape[1], 1)], -1))
                 cur_pred_val = seg_pred.cpu().data.numpy()
                 cur_pred_val_logits = cur_pred_val
                 cur_pred_val = np.zeros((cur_batch_size, NUM_POINT)).astype(np.int32)
@@ -176,7 +171,7 @@ def main(args):
                 total_correct += correct
                 total_seen += (cur_batch_size * NUM_POINT)
 
-                for l in range(num_part):
+                for l in range(args.dataset.num_class):
                     total_seen_class[l] += np.sum(target == l)
                     total_correct_class[l] += (np.sum((cur_pred_val == l) & (target == l)))
 

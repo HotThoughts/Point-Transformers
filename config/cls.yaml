@@ -1,11 +1,18 @@
 batch_size: 16
 epoch: 200
 learning_rate: 1e-3
-gpu: 1
-num_point: 1024
+gpu: 0
 optimizer: Adam
 weight_decay: 1e-4
-normal: True
+
+dataset:
+  path: data/modelnet40_normal_resampled/
+  normal: True
+  num_class: 40
+  num_point: 1024
+  num_workers: 6
+  input_dim: 6
+  input_dim_not_normal: 3
 
 defaults:
   - model: Menghao

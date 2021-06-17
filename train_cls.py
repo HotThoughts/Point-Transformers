@@ -3,26 +3,23 @@ Author: Benny
 Date: Nov 2019
 """
 from dataset import ModelNetDataLoader
-import argparse
 import numpy as np
 import os
 import torch
-import datetime
 import logging
-from pathlib import Path
 from tqdm import tqdm
-import sys
 import provider
 import importlib
 import shutil
 import hydra
 import omegaconf
+from pprint import pformat
 
 
 def test(model, loader, num_class=40):
     mean_correct = []
     class_acc = np.zeros((num_class,3))
-    for j, data in tqdm(enumerate(loader), total=len(loader)):
+    for _, data in tqdm(enumerate(loader), total=len(loader)):
         points, target = data
         target = target[:, 0]
         points, target = points.cuda(), target.cuda()
@@ -49,20 +46,20 @@ def main(args):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     logger = logging.getLogger(__name__)
 
-    print(args.pretty())
-
+    print(pformat(args))
     '''DATA LOADING'''
     logger.info('Load dataset ...')
-    DATA_PATH = hydra.utils.to_absolute_path('modelnet40_normal_resampled/')
+    DATA_PATH = hydra.utils.to_absolute_path(args.dataset.path)
 
-    TRAIN_DATASET = ModelNetDataLoader(root=DATA_PATH, npoint=args.num_point, split='train', normal_channel=args.normal)
-    TEST_DATASET = ModelNetDataLoader(root=DATA_PATH, npoint=args.num_point, split='test', normal_channel=args.normal)
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    TRAIN_DATASET = ModelNetDataLoader(root=DATA_PATH, npoint=args.dataset.num_point, split='train', normal_channel=args.dataset.normal)
+    TEST_DATASET = ModelNetDataLoader(root=DATA_PATH, npoint=args.dataset.num_point, split='test', normal_channel=args.dataset.normal)
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=args.batch_size, shuffle=True, num_workers=args.dataset.num_workers)
+    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=args.batch_size, shuffle=False, num_workers=args.dataset.num_workers)
 
     '''MODEL LOADING'''
-    args.num_class = 40
-    args.input_dim = 6 if args.normal else 3
+    if not args.dataset.normal:
+        args.dataset.input_dim = args.dataset.input_dim_not_normal
+
     shutil.copy(hydra.utils.to_absolute_path('models/{}/model.py'.format(args.model.name)), '.')
 
     classifier = getattr(importlib.import_module('models.{}.model'.format(args.model.name)), 'PointTransformerCls')(args).cuda()
@@ -101,7 +98,7 @@ def main(args):
     logger.info('Start training...')
     for epoch in range(start_epoch,args.epoch):
         logger.info('Epoch %d (%d/%s):' % (global_epoch + 1, epoch + 1, args.epoch))
-        
+
         classifier.train()
         for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
             points, target = data
@@ -123,7 +120,7 @@ def main(args):
             loss.backward()
             optimizer.step()
             global_step += 1
-            
+
         scheduler.step()
 
         train_instance_acc = np.mean(mean_correct)

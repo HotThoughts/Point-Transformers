@@ -5,11 +5,11 @@ from pointnet_util import farthest_point_sample, index_points, square_distance
 
 def sample_and_group(npoint, nsample, xyz, points):
     B, N, C = xyz.shape
-    S = npoint 
-    
+    S = npoint
+
     fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint]
 
-    new_xyz = index_points(xyz, fps_idx) 
+    new_xyz = index_points(xyz, fps_idx)
     new_points = index_points(points, fps_idx)
 
     dists = square_distance(new_xyz, xyz)  # B x npoint x N
@@ -31,7 +31,7 @@ class Local_op(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        b, n, s, d = x.size()  # torch.Size([32, 512, 32, 6]) 
+        b, n, s, d = x.size()  # torch.Size([32, 512, 32, 6])
         x = x.permute(0, 1, 3, 2)
         x = x.reshape(-1, d, s)
         batch_size, _, N = x.size()
@@ -48,7 +48,7 @@ class SA_Layer(nn.Module):
         super().__init__()
         self.q_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
         self.k_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
-        self.q_conv.weight = self.k_conv.weight 
+        self.q_conv.weight = self.k_conv.weight
         self.v_conv = nn.Conv1d(channels, channels, 1)
         self.trans_conv = nn.Conv1d(channels, channels, 1)
         self.after_norm = nn.BatchNorm1d(channels)
@@ -56,17 +56,17 @@ class SA_Layer(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
-        x_q = self.q_conv(x).permute(0, 2, 1) # b, n, c 
-        x_k = self.k_conv(x)# b, c, n        
+        x_q = self.q_conv(x).permute(0, 2, 1) # b, n, c
+        x_k = self.k_conv(x)# b, c, n
         x_v = self.v_conv(x)
-        energy = x_q @ x_k # b, n, n 
+        energy = x_q @ x_k # b, n, n
         attention = self.softmax(energy)
         attention = attention / (1e-9 + attention.sum(dim=1, keepdims=True))
-        x_r = x_v @ attention # b, c, n 
+        x_r = x_v @ attention # b, c, n
         x_r = self.act(self.after_norm(self.trans_conv(x - x_r)))
         x = x + x_r
         return x
-    
+
 
 class StackedAttention(nn.Module):
     def __init__(self, channels=256):
@@ -83,12 +83,12 @@ class StackedAttention(nn.Module):
         self.sa4 = SA_Layer(channels)
 
         self.relu = nn.ReLU()
-        
+
     def forward(self, x):
-        # 
-        # b, 3, npoint, nsample  
+        #
+        # b, 3, npoint, nsample
         # conv2d 3 -> 128 channels 1, 1
-        # b * npoint, c, nsample 
+        # b * npoint, c, nsample
         # permute reshape
         batch_size, _, N = x.size()
 
@@ -99,7 +99,7 @@ class StackedAttention(nn.Module):
         x2 = self.sa2(x1)
         x3 = self.sa3(x2)
         x4 = self.sa4(x3)
-        
+
         x = torch.cat((x1, x2, x3, x4), dim=1)
 
         return x
@@ -108,8 +108,8 @@ class StackedAttention(nn.Module):
 class PointTransformerCls(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        output_channels = cfg.num_class
-        d_points = cfg.input_dim
+        output_channels = cfg.dataset.num_class
+        d_points = cfg.dataset.input_dim
         self.conv1 = nn.Conv1d(d_points, 64, kernel_size=1, bias=False)
         self.conv2 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm1d(64)
@@ -138,12 +138,12 @@ class PointTransformerCls(nn.Module):
         x = self.relu(self.bn1(self.conv1(x))) # B, D, N
         x = self.relu(self.bn2(self.conv2(x))) # B, D, N
         x = x.permute(0, 2, 1)
-        new_xyz, new_feature = sample_and_group(npoint=512, nsample=32, xyz=xyz, points=x)         
+        new_xyz, new_feature = sample_and_group(npoint=512, nsample=32, xyz=xyz, points=x)
         feature_0 = self.gather_local_0(new_feature)
         feature = feature_0.permute(0, 2, 1)
-        new_xyz, new_feature = sample_and_group(npoint=256, nsample=32, xyz=new_xyz, points=feature) 
+        new_xyz, new_feature = sample_and_group(npoint=256, nsample=32, xyz=new_xyz, points=feature)
         feature_1 = self.gather_local_1(new_feature)
-        
+
         x = self.pt_last(feature_1)
         x = torch.cat([x, feature_1], dim=1)
         x = self.conv_fuse(x)

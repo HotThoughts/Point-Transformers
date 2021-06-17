@@ -1,5 +1,9 @@
 .vscode
 __pycache__/
-modelnet40_normal_resampled/
 outputs/
 log/
+data/
+.ipynb_aml_checkpoints
+.aml*
+**.ipynb*
+.venv

@@ -1,13 +1,21 @@
-batch_size: 16
+batch_size: 10
 epoch: 200
 learning_rate: 1e-3
-gpu: 1
-num_point: 1024
+gpu: 0
 optimizer: Adam
 weight_decay: 1e-4
-normal: True
 lr_decay: 0.5
 step_size: 20
+
+dataset:
+  path: data/shapenetcore_partanno_segmentation_benchmark_v0_normal/
+  normal: True
+  num_class: 50
+  num_category: 16
+  num_point: 1024
+  num_workers: 6
+  input_dim: 22
+  input_dim_not_normal: 19
 
 defaults:
   - model: Hengshuang
