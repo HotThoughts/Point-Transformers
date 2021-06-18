@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+
 from pointnet_util import farthest_point_sample, index_points, square_distance
 
 
@@ -7,7 +8,7 @@ def sample_and_group(npoint, nsample, xyz, points):
     B, N, C = xyz.shape
     S = npoint
 
-    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint]
+    fps_idx = farthest_point_sample(xyz, npoint)  # [B, npoint]
 
     new_xyz = index_points(xyz, fps_idx)
     new_points = index_points(points, fps_idx)
@@ -17,7 +18,10 @@ def sample_and_group(npoint, nsample, xyz, points):
 
     grouped_points = index_points(points, idx)
     grouped_points_norm = grouped_points - new_points.view(B, S, 1, -1)
-    new_points = torch.cat([grouped_points_norm, new_points.view(B, S, 1, -1).repeat(1, 1, nsample, 1)], dim=-1)
+    new_points = torch.cat(
+        [grouped_points_norm, new_points.view(B, S, 1, -1).repeat(1, 1, nsample, 1)],
+        dim=-1,
+    )
     return new_xyz, new_points
 
 
@@ -35,8 +39,8 @@ class Local_op(nn.Module):
         x = x.permute(0, 1, 3, 2)
         x = x.reshape(-1, d, s)
         batch_size, _, N = x.size()
-        x = self.relu(self.bn1(self.conv1(x))) # B, D, N
-        x = self.relu(self.bn2(self.conv2(x))) # B, D, N
+        x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
+        x = self.relu(self.bn2(self.conv2(x)))  # B, D, N
         x = torch.max(x, 2)[0]
         x = x.view(batch_size, -1)
         x = x.reshape(b, n, -1).permute(0, 2, 1)
@@ -56,13 +60,13 @@ class SA_Layer(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
-        x_q = self.q_conv(x).permute(0, 2, 1) # b, n, c
-        x_k = self.k_conv(x)# b, c, n
+        x_q = self.q_conv(x).permute(0, 2, 1)  # b, n, c
+        x_k = self.k_conv(x)  # b, c, n
         x_v = self.v_conv(x)
-        energy = x_q @ x_k # b, n, n
+        energy = x_q @ x_k  # b, n, n
         attention = self.softmax(energy)
         attention = attention / (1e-9 + attention.sum(dim=1, keepdims=True))
-        x_r = x_v @ attention # b, c, n
+        x_r = x_v @ attention  # b, c, n
         x_r = self.act(self.after_norm(self.trans_conv(x - x_r)))
         x = x + x_r
         return x
@@ -92,7 +96,7 @@ class StackedAttention(nn.Module):
         # permute reshape
         batch_size, _, N = x.size()
 
-        x = self.relu(self.bn1(self.conv1(x))) # B, D, N
+        x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
         x = self.relu(self.bn2(self.conv2(x)))
 
         x1 = self.sa1(x)
@@ -119,9 +123,11 @@ class PointTransformerCls(nn.Module):
         self.pt_last = StackedAttention()
 
         self.relu = nn.ReLU()
-        self.conv_fuse = nn.Sequential(nn.Conv1d(1280, 1024, kernel_size=1, bias=False),
-                                   nn.BatchNorm1d(1024),
-                                   nn.LeakyReLU(negative_slope=0.2))
+        self.conv_fuse = nn.Sequential(
+            nn.Conv1d(1280, 1024, kernel_size=1, bias=False),
+            nn.BatchNorm1d(1024),
+            nn.LeakyReLU(negative_slope=0.2),
+        )
 
         self.linear1 = nn.Linear(1024, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
@@ -135,13 +141,17 @@ class PointTransformerCls(nn.Module):
         xyz = x[..., :3]
         x = x.permute(0, 2, 1)
         batch_size, _, _ = x.size()
-        x = self.relu(self.bn1(self.conv1(x))) # B, D, N
-        x = self.relu(self.bn2(self.conv2(x))) # B, D, N
+        x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
+        x = self.relu(self.bn2(self.conv2(x)))  # B, D, N
         x = x.permute(0, 2, 1)
-        new_xyz, new_feature = sample_and_group(npoint=512, nsample=32, xyz=xyz, points=x)
+        new_xyz, new_feature = sample_and_group(
+            npoint=512, nsample=32, xyz=xyz, points=x
+        )
         feature_0 = self.gather_local_0(new_feature)
         feature = feature_0.permute(0, 2, 1)
-        new_xyz, new_feature = sample_and_group(npoint=256, nsample=32, xyz=new_xyz, points=feature)
+        new_xyz, new_feature = sample_and_group(
+            npoint=256, nsample=32, xyz=new_xyz, points=feature
+        )
         feature_1 = self.gather_local_1(new_feature)
 
         x = self.pt_last(feature_1)
