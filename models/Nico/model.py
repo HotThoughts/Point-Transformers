@@ -60,13 +60,11 @@ class LocalFeatureGeneration(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 256),
             nn.ReLU(),
-            nn.Linear(256, d_model),
-        )
-        self.sortnets = nn.ModuleList([SortNet(d_model, k=k)] * m)
-        self.att = MultiHeadAttention(
-            n_head, d_model, d_model, d_model // n_head, d_model // n_head
-        )
-
+            nn.Linear(256, d_model)
+        ) 
+        self.sortnets = nn.ModuleList([SortNet(d_model, k=k) for _ in range(m)])
+        self.att = MultiHeadAttention(n_head, d_model, d_model, d_model // n_head, d_model // n_head)
+        
     def forward(self, points):
         x = self.fc(points)
         x, _ = self.att(x, x, x)
@@ -155,3 +153,4 @@ class PointTransformerCls(nn.Module):
         x = self.fc(lg_features).reshape(points.size(0), -1)
         out = self.fc_cls(x)
         return out
+        
